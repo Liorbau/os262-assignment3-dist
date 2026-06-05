@@ -548,6 +548,17 @@ void virtio_gpu_commit(void)
     gpu_transfer_flush();
 }
 
+// Return the physical address of framebuffer page i (0 <= i < GPU_FB_PAGES).
+// Lets other kernel code (the map_display syscall) install these
+// kernel-owned pages into a user page table.
+uint64
+gpu_fb_pa(int i)
+{
+    if (i < 0 || i >= FB_PAGES)
+        return 0;
+    return (uint64)fb[i];
+}
+
 // ── GPU daemon ────────────────────────────────────────────────────────
 // Kernel process started by kproc_create().  Wakes every DISPLAY_DAEMON_TICKS
 // timer ticks and issues TRANSFER_TO_HOST_2D + RESOURCE_FLUSH so that

@@ -158,6 +158,10 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if(p->fb_va){
+    uvmunmap(p->pagetable, p->fb_va, GPU_FB_PAGES, 0);  // do_free=0: kernel owns fb[]
+    p->fb_va = 0;
+  }
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;

@@ -111,10 +111,55 @@ sys_flip_display(void)
 //   Pass 0 to let the kernel auto-select the next available VA above p->sz.
 //
 // Returns the mapped virtual address on success, (uint64)-1 on failure.
-//
-// TODO: Students implement this syscall.
 uint64
 sys_map_display(void)
 {
-  return -1;
+  uint64 addr;
+  argaddr(0, &addr);                 // read syscall arg 0 (the requested VA)
+
+  struct proc *p = myproc();
+  uint64 size = GPU_FB_PAGES * PGSIZE;
+
+  // --- Decide the virtual address to map at ---
+  uint64 va;
+  if (addr == 0) {
+    // Auto-select: first page-aligned VA above the process's memory.
+    va = PGROUNDUP(p->sz);
+  } else {
+    // Caller-supplied VA: must be page-aligned.
+    if (addr % PGSIZE != 0)
+      return -1;
+    va = addr;
+  }
+
+  // Sanity: the whole region must fit below MAXVA and not wrap around.
+  if (va + size > MAXVA || va + size < va)
+    return -1;
+
+  // --- Collision check: none of the target pages may already be mapped ---
+  for (uint64 a = va; a < va + size; a += PGSIZE) {
+    pte_t *pte = walk(p->pagetable, a, 0);   // alloc=0: just look, don't create
+    if (pte != 0 && (*pte & PTE_V))
+      return -1;                              // something is already here
+  }
+
+  // --- Install the mapping, one kernel fb page at a time ---
+  for (int i = 0; i < GPU_FB_PAGES; i++) {
+    uint64 pa = gpu_fb_pa(i);
+    if (pa == 0) {
+      // Should never happen, but roll back cleanly if it does.
+      uvmunmap(p->pagetable, va, i, 0);       // do_free = 0: kernel owns pages
+      return -1;
+    }
+    if (mappages(p->pagetable, va + (uint64)i * PGSIZE, PGSIZE, pa,
+                 PTE_U | PTE_R | PTE_W) != 0) {
+      uvmunmap(p->pagetable, va, i, 0);       // undo the i pages mapped so far
+      return -1;
+    }
+  }
+
+  // Remember it so we can take it down when the process exits.
+  p->fb_va = va;
+
+  return va;                                  // success: hand the VA to userspace
 }
