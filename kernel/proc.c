@@ -155,6 +155,16 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  if(p->flipped){
+    // Preserve the last flipped frame by copying it into kernel fb[]
+    // before restoring GPU backing away from soon-to-be-freed user pages.
+    if(p->flip_va)
+      virtio_gpu_snapshot_restore(p->pagetable, p->flip_va);
+    else
+      virtio_gpu_restore();
+    p->flip_va = 0;
+    p->flipped = 0;
+  }
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;

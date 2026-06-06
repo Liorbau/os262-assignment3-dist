@@ -105,4 +105,6 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   uint64 fb_va;                // VA where the GPU framebuffer is mapped (0 = none)
+  uint64 flip_va;              // VA of last buffer passed to flip_display (0 = none)
+  int flipped;                 // 1 if this proc re-pointed the GPU via flip
 };

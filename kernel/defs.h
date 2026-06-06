@@ -190,6 +190,9 @@ void            virtio_disk_intr(void);
 void            virtio_gpu_init(void);
 void            virtio_gpu_commit(void);
 void            display_daemon(void);
+void            virtio_gpu_flip(pagetable_t, uint64);
+void            virtio_gpu_snapshot_restore(pagetable_t, uint64);
+void            virtio_gpu_restore(void);
 uint64          gpu_fb_pa(int);
 
 // number of elements in fixed-size array

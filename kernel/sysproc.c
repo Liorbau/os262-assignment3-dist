@@ -96,12 +96,31 @@ sys_uptime(void)
 // that is exactly GPU_FB_PAGES (300) * PGSIZE bytes (i.e. 640x480x4 =
 // 1,228,800 bytes).  The buffer must already be fully mapped in the
 // calling process's address space.
-//
-// TODO: Students implement this syscall.
 uint64
 sys_flip_display(void)
 {
-  return -1;
+  uint64 buf;
+  argaddr(0, &buf);                 // arg 0 = user VA of the page-aligned buffer
+
+  struct proc *p = myproc();
+
+  // Must be page-aligned (the device backs whole pages).
+  if (buf % PGSIZE != 0)
+    return -1;
+
+  // Validate: every one of the 300 pages must be mapped with user perm.
+  // walkaddr returns 0 if the page is missing OR lacks PTE_U.
+  for (int i = 0; i < GPU_FB_PAGES; i++) {
+    if (walkaddr(p->pagetable, buf + (uint64)i * PGSIZE) == 0)
+      return -1;
+  }
+
+  // Re-point the device at this process's buffer (zero-copy).
+  virtio_gpu_flip(p->pagetable, buf);
+
+  p->flip_va = buf;                   // remember which buffer was flipped
+  p->flipped = 1;                   // remember, for safe cleanup on exit (Step 3)
+  return 0;
 }
 
 // sys_map_display: map the GPU's kernel framebuffer pages (fb[]) directly
@@ -123,8 +142,9 @@ sys_map_display(void)
   // --- Decide the virtual address to map at ---
   uint64 va;
   if (addr == 0) {
-    // Auto-select: first page-aligned VA above the process's memory.
-    va = PGROUNDUP(p->sz);
+    // Auto-select from a high user VA region below TRAPFRAME so future
+    // heap growth (sbrk) does not collide with this mapping.
+    va = PGROUNDDOWN(TRAPFRAME - size);
   } else {
     // Caller-supplied VA: must be page-aligned.
     if (addr % PGSIZE != 0)

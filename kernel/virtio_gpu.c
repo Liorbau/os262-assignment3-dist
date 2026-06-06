@@ -548,6 +548,25 @@ void virtio_gpu_commit(void)
     gpu_transfer_flush();
 }
 
+// Re-point the display device at the user buffer mapped at `va` in
+// page table `pt`. Zero-copy: only the backing list changes, no pixels move.
+// Caller must have already validated that all GPU_FB_PAGES pages are
+// mapped with user permission.
+void
+virtio_gpu_flip(pagetable_t pt, uint64 va)
+{
+    static struct virtio_gpu_mem_entry entries[FB_PAGES];
+    for (int i = 0; i < FB_PAGES; i++) {
+        uint64 pa = walkaddr(pt, va + (uint64)i * PGSIZE);  // VA -> PA
+        entries[i].addr    = pa;
+        entries[i].length  = PGSIZE;
+        entries[i].padding = 0;
+    }
+    gpu_cmd_detach();              // drop the old backing (kernel fb[] or prev buffer)
+    gpu_cmd_attach(entries, FB_PAGES);  // attach the user's physical pages
+    gpu_transfer_flush();          // upload + flush now, so it appears immediately
+}
+
 // Return the physical address of framebuffer page i (0 <= i < GPU_FB_PAGES).
 // Lets other kernel code (the map_display syscall) install these
 // kernel-owned pages into a user page table.
@@ -588,4 +607,32 @@ void display_daemon(void)
         virtio_gpu_commit();
         acquire(&tickslock);
     }
+}
+
+// Re-point the device back at the kernel-owned fb[] pages.
+void
+virtio_gpu_restore(void)
+{
+    static struct virtio_gpu_mem_entry entries[FB_PAGES];
+    for (int i = 0; i < FB_PAGES; i++) {
+        entries[i].addr    = (uint64)fb[i];
+        entries[i].length  = PGSIZE;
+        entries[i].padding = 0;
+    }
+    gpu_cmd_detach();
+    gpu_cmd_attach(entries, FB_PAGES);
+}
+
+// Copy a flipped user framebuffer into kernel fb[], then restore backing
+// to fb[] so the device no longer depends on user pages after process exit.
+void
+virtio_gpu_snapshot_restore(pagetable_t pt, uint64 va)
+{
+    for (int i = 0; i < FB_PAGES; i++) {
+        uint64 pa = walkaddr(pt, va + (uint64)i * PGSIZE);
+        if (pa == 0)
+            break;
+        memmove(fb[i], (void *)pa, PGSIZE);
+    }
+    virtio_gpu_restore();
 }
